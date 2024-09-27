@@ -9,38 +9,85 @@ const rename = promisify(fs.rename);
 const removeOptions = { maxRetries: 3, recursive: true };
 
 const rl = readline.createInterface({
-	input: process.stdin,
-	output: process.stdout,
+  input: process.stdin,
+  output: process.stdout,
 });
 
-const fossify = async () => {
-	console.log('Removing Premium Apps and Packages...');
-	await rmdir('./ee', removeOptions);
-
-	console.log('Removing Premium code in the main app...');
-	await rmdir('./apps/meteor/ee', removeOptions);
-
-	console.log('Replacing main files...');
-	await unlink('./apps/meteor/server/ee.ts');
-
-	await rename('./apps/meteor/server/foss.ts', './apps/meteor/server/ee.ts');
-
-	console.log('Done.');
+const askQuestion = (query) => {
+  return new Promise((resolve) => rl.question(query, resolve));
 };
 
-rl.question('Running this script will permanently delete files from the local directory. Proceed? (n,y) ', (answer) => {
-	rl.close();
+const removeDir = async (path, description) => {
+  try {
+    console.log(`Removing ${description}...`);
+    await rmdir(path, removeOptions);
+    console.log(`${description} removed successfully.`);
+  } catch (error) {
+    throw new Error(`Failed to remove ${description}: ${error.message}`);
+  }
+};
 
-	if (answer.toLowerCase() !== 'y') {
-		return;
-	}
+const removeFile = async (path, description) => {
+  try {
+    console.log(`Removing ${description}...`);
+    await unlink(path);
+    console.log(`${description} removed successfully.`);
+  } catch (error) {
+    throw new Error(`Failed to remove ${description}: ${error.message}`);
+  }
+};
 
-	fossify().catch((e) => {
-		if (!e) {
-			console.error('Unknown error');
-			return;
-		}
+const replaceFile = async (oldPath, newPath) => {
+  try {
+    console.log(`Replacing ${oldPath} with ${newPath}...`);
+    await rename(newPath, oldPath);
+    console.log(`File replaced successfully.`);
+  } catch (error) {
+    throw new Error(`Failed to replace file: ${error.message}`);
+  }
+};
 
-		console.error(e);
-	});
-});
+const fossify = async (dryRun = false) => {
+  try {
+    console.log(dryRun ? 'Dry run enabled. No files will be deleted.' : 'Starting the removal process...');
+
+    if (!dryRun) {
+      await removeDir('./ee', 'Premium Apps and Packages');
+      await removeDir('./apps/meteor/ee', 'Premium code in the main app');
+      await removeFile('./apps/meteor/server/ee.ts', 'premium EE TypeScript file');
+    }
+
+    console.log('Replacing main files...');
+    await replaceFile('./apps/meteor/server/ee.ts', './apps/meteor/server/foss.ts');
+    
+    console.log(dryRun ? 'Dry run completed. No changes were made.' : 'Process completed successfully.');
+  } catch (error) {
+    console.error(`Error: ${error.message}`);
+  }
+};
+
+const startProcess = async () => {
+  try {
+    let answer;
+    while (!['y', 'n', 'dry'].includes(answer?.toLowerCase())) {
+      answer = await askQuestion('Running this script will permanently delete files from the local directory. Proceed? (y, n, dry for dry-run) ');
+    }
+
+    if (answer.toLowerCase() === 'n') {
+      console.log('Operation aborted by user.');
+      rl.close();
+      return;
+    }
+
+    const dryRun = answer.toLowerCase() === 'dry';
+    await fossify(dryRun);
+
+  } catch (error) {
+    console.error(`An unexpected error occurred: ${error.message}`);
+  } finally {
+    rl.close();
+  }
+};
+
+// Start the process
+startProcess();
